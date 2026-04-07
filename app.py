@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from collections import defaultdict
 import secrets
 import string
+from api_users import register_user_api
 
 # Настройка путей
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -482,6 +483,17 @@ def download_cert_link(link_id):
         logger.error(traceback.format_exc())
         flash('Произошла ошибка при скачивании сертификата')
         return render_template('cert_download.html', valid=False)
+
+
+register_user_api(
+    app=app,
+    admin_config=ADMIN_CONFIG,
+    add_user_to_db=add_user_to_db,
+    delete_user_from_db=delete_user_from_db,
+    get_db=get_db,
+    cert_dir=CERT_DIR,
+    logger=logger
+)
 
 
 if __name__ == '__main__':

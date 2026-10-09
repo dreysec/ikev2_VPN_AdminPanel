@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import logging
 import traceback
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from collections import defaultdict
 import secrets
 import string
@@ -16,6 +17,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = BASE_DIR + '/logs/vpn-admin.log'
 CERT_DIR = os.path.join(BASE_DIR, 'certificates')
 DB_PATH = os.path.join(BASE_DIR, 'vpn_users.db')
+
+# Параметры запуска. Значения по умолчанию — как раньше (HTTP на 0.0.0.0:5000),
+# переопределяются переменными окружения (в systemd — через /etc/vpn_admin.env).
+HOST = os.environ.get('VPN_ADMIN_HOST', '0.0.0.0')
+PORT = int(os.environ.get('VPN_ADMIN_PORT', '5000'))
+# Пути к сертификату и ключу (например, Let's Encrypt) включают HTTPS прямо в панели.
+SSL_CERT = os.environ.get('VPN_ADMIN_SSL_CERT', '').strip()
+SSL_KEY = os.environ.get('VPN_ADMIN_SSL_KEY', '').strip()
+# 1 — панель стоит за обратным прокси (nginx) и должна доверять его заголовкам
+# X-Forwarded-*, иначе внешние ссылки на сертификаты будут с http:// вместо https://.
+BEHIND_PROXY = os.environ.get('VPN_ADMIN_BEHIND_PROXY', '0') == '1'
+# Secure-кука по умолчанию включается только при собственном HTTPS панели.
+SECURE_COOKIES = os.environ.get('VPN_ADMIN_SECURE_COOKIES', '1' if SSL_CERT else '0') == '1'
 
 # Создаем необходимые директории
 os.makedirs(CERT_DIR, exist_ok=True)
@@ -38,6 +52,26 @@ logger.addHandler(console_handler)
 
 app = Flask(__name__)
 app.secret_key = '9QrDj806Rrs0Pf2jfwLvbGDbrN1zWMsL'
+
+if BEHIND_PROXY:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+app.config.update(
+    SESSION_COOKIE_SECURE=SECURE_COOKIES,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+)
+
+
+def get_ssl_context():
+    """None — обычный HTTP. Если заданы пути к сертификату, а файлов нет,
+    сразу падаем с понятным сообщением, а не молча стартуем без HTTPS."""
+    if not SSL_CERT and not SSL_KEY:
+        return None
+    if not (os.path.isfile(SSL_CERT) and os.path.isfile(SSL_KEY)):
+        logger.error(f"HTTPS включён, но файлы не найдены: cert={SSL_CERT!r}, key={SSL_KEY!r}")
+        raise SystemExit(1)
+    return SSL_CERT, SSL_KEY
 
 # Конфигурация
 ADMIN_CONFIG = {
@@ -499,4 +533,6 @@ register_user_api(
 if __name__ == '__main__':
     # Инициализация базы данных
     init_db()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    ssl_context = get_ssl_context()
+    logger.info(f"Starting on {HOST}:{PORT}, HTTPS: {'on' if ssl_context else 'off'}")
+    app.run(host=HOST, port=PORT, debug=False, ssl_context=ssl_context)

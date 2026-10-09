@@ -62,6 +62,25 @@ deactivate
 
 # === Создание systemd unit-файла ===
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+ENV_FILE="/etc/${SERVICE_NAME}.env"
+
+# === Файл настроек (HTTPS, порт и т.д.) — создаётся только если его ещё нет ===
+if [ ! -f "$ENV_FILE" ]; then
+    sudo bash -c "cat > $ENV_FILE" <<'EOF'
+# Настройки панели. Все строки необязательны, без них панель работает как раньше (HTTP, порт 5000).
+# После изменений: sudo systemctl restart vpn_admin
+
+#VPN_ADMIN_HOST=0.0.0.0
+#VPN_ADMIN_PORT=5000
+
+# HTTPS прямо в панели (пример для Let's Encrypt, подставьте свой домен):
+#VPN_ADMIN_SSL_CERT=/etc/letsencrypt/live/example.com/fullchain.pem
+#VPN_ADMIN_SSL_KEY=/etc/letsencrypt/live/example.com/privkey.pem
+
+# Если панель стоит за nginx (HTTPS терминирует nginx), включите доверие его заголовкам:
+#VPN_ADMIN_BEHIND_PROXY=1
+EOF
+fi
 
 sudo bash -c "cat > $SERVICE_FILE" <<EOF
 [Unit]
@@ -72,6 +91,7 @@ After=network.target
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$WORKDIR
+EnvironmentFile=-$ENV_FILE
 ExecStart=$WORKDIR/venv/bin/python $WORKDIR/$APP_FILE
 Restart=on-failure
 

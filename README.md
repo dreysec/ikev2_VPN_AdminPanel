@@ -88,6 +88,58 @@ sudo systemctl status vpn_admin
 
 ---
 
+## HTTPS
+
+По умолчанию панель отвечает по обычному HTTP. Если открыть её по `https://`, браузер
+скажет, что защищённое соединение не поддерживается. Есть два способа включить HTTPS.
+
+Настройки задаются переменными окружения; для systemd-сервиса их удобно держать в файле
+`/etc/vpn_admin.env` (скрипт установки его создаёт и подключает к сервису).
+
+### Вариант 1. HTTPS прямо в панели (Let's Encrypt)
+
+В `/etc/vpn_admin.env` (подставьте свой домен и порт):
+
+```
+VPN_ADMIN_PORT=53523
+VPN_ADMIN_SSL_CERT=/etc/letsencrypt/live/example.com/fullchain.pem
+VPN_ADMIN_SSL_KEY=/etc/letsencrypt/live/example.com/privkey.pem
+```
+
+```sh
+sudo systemctl restart vpn_admin
+```
+
+Панель откроется по `https://example.com:53523`. Если файлы сертификата не найдены, сервис
+не запустится, причина будет в `journalctl -u vpn_admin`. Сервис должен работать от
+пользователя, который может читать ключ (по умолчанию установщик запускает его от того, кто его
+вызвал, обычно root).
+
+Сертификат подгружается при старте, поэтому после продления Let's Encrypt панель нужно
+перезапускать. Для этого добавьте хук:
+
+```sh
+printf '#!/bin/sh\nsystemctl restart vpn_admin\n' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/restart-vpn-admin.sh
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-vpn-admin.sh
+```
+
+### Вариант 2. За nginx
+
+HTTPS терминирует nginx, панель слушает только localhost. В `/etc/vpn_admin.env`:
+
+```
+VPN_ADMIN_HOST=127.0.0.1
+VPN_ADMIN_PORT=53523
+VPN_ADMIN_BEHIND_PROXY=1
+```
+
+Без `VPN_ADMIN_BEHIND_PROXY=1` ссылки на скачивание сертификатов будут строиться с `http://`.
+В nginx должны передаваться заголовки `X-Forwarded-Proto`, `X-Forwarded-For` и `Host`.
+
+Используйте один из вариантов: два листенера на одном порту работать не будут.
+
+---
+
 ## Структура проекта
 
 ```
